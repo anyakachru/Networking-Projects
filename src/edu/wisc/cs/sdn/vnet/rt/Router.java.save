@@ -1,0 +1,179 @@
+package edu.wisc.cs.sdn.vnet.rt;
+import net.floodlightcontroller.packet.MACAddress;
+import edu.wisc.cs.sdn.vnet.Device;
+import edu.wisc.cs.sdn.vnet.DumpFile;
+import edu.wisc.cs.sdn.vnet.Iface;
+import net.floodlightcontroller.packet.IPv4;
+import net.floodlightcontroller.packet.Ethernet;
+import java.util.*;
+
+/**
+ * @author Aaron Gember-Jacobson and Anubhavnidhi Abhashkumar
+ */
+public class Router extends Device
+{	
+	/** Routing table for the router */
+	private RouteTable routeTable;
+	
+	/** ARP cache for the router */
+	private ArpCache arpCache;
+private final boolean dbg = false;	
+	/**
+	 * Creates a router for a specific host.
+	 * @param host hostname for the router
+	 */
+	public Router(String host, DumpFile logfile)
+	{
+		super(host,logfile);
+		this.routeTable = new RouteTable();
+		this.arpCache = new ArpCache();
+	}
+	
+	/**
+	 * @return routing table for the router
+	 */
+	public RouteTable getRouteTable()
+	{ return this.routeTable; }
+	
+	/**
+	 * Load a new routing table from a file.
+	 * @param routeTableFile the name of the file containing the routing table
+	 */
+	public void loadRouteTable(String routeTableFile)
+	{
+		if (!routeTable.load(routeTableFile, this))
+		{
+			System.err.println("Error setting up routing table from file "
+					+ routeTableFile);
+			System.exit(1);
+		}
+		
+		System.out.println("Loaded static route table");
+		System.out.println("-------------------------------------------------");
+		System.out.print(this.routeTable.toString());
+		System.out.println("-------------------------------------------------");
+	}
+	
+	/**
+	 * Load a new ARP cache from a file.
+	 * @param arpCacheFile the name of the file containing the ARP cache
+	 */
+	public void loadArpCache(String arpCacheFile)
+	{
+		if (!arpCache.load(arpCacheFile))
+		{
+			System.err.println("Error setting up ARP cache from file "
+					+ arpCacheFile);
+			System.exit(1);
+		}
+		
+		System.out.println("Loaded static ARP cache");
+		System.out.println("----------------------------------");
+		System.out.print(this.arpCache.toString());
+		System.out.println("----------------------------------");
+	}
+
+	/**
+	 * Handle an Ethernet packet received on a specific interface.
+	 * @param etherPacket the Ethernet packet that was received
+	 * @param inIface the interface on which the packet was received
+	 */
+	public void handlePacket(Ethernet etherPacket, Iface inIface)
+	{
+		System.out.println("*** -> Received packet: " +
+				etherPacket.toString().replace("\n", "\n\t"));
+
+
+		if (etherPacket.getEtherType() != Ethernet.TYPE_IPv4) return; //return if not an IP Packet
+
+        IPv4 ipPacket = (IPv4) etherPacket.getPayload();
+
+		//verify checksum
+        short originalChecksum = ipPacket.getChecksum();
+
+		ipPacket = ipPacket.setChecksum((short)0);
+        byte[] serialized = ipPacket.serialize();
+		ipPacket = (IPv4)ipPacket.deserialize(serialized, 0, serialized.length);
+
+			if (originalChecksum == ipPacket.getChecksum()) {
+			ipPacket = ipPacket.setTtl((byte)(ipPacket.getTtl() - 1));
+		}
+		
+		//update TTL
+		byte ttl = ipPacket.getTtl();
+		Ethernet nep = null; 
+		if (ttl > (byte)0) {
+
+		ipPacket = ipPacket.setChecksum((short)0);
+		serialized = ipPacket.serialize();
+		ipPacket = (IPv4)ipPacket.deserialize(serialized, 0, serialized.length);
+		nep = (Ethernet)etherPacket.setPayload(ipPacket);
+
+		//Recompute checksum
+		//ipPacket.resetChecksum();
+		//ipPacket.computeChecksum();
+
+			for (Iface ifa : interfaces.values()) {
+			if (ifa.getIpAddress() == ipPacket.getDestinationAddress()) {
+								return;
+								}
+							}
+		}
+		//Lookup route
+		RouteEntry bestMatch = routeTable.lookup(ipPacket.getDestinationAddress());
+		//ArpEntry an = arpCache.lookup(bestMatch.getGatewayAddress());  
+		if (bestMatch == null) { return; }
+
+		//int nextHop = bestMatch.getGatewayAddress();
+		// if (nextHop == 0)
+		// {
+		// 	nextHop = ipPacket.getDestinationAddress();
+		// }
+
+		//ArpEntry an = arpCache.lookup(bestMatch.getGatewayAddress());
+		ArpEntry an = null;
+
+		// if (an == null)
+		// {
+		// 	return; // drop if no ARP entry
+		// }
+
+		if (bestMatch.getGatewayAddress() != 0) {
+			an = arpCache.lookup(bestMatch.getGatewayAddress());
+		} else {
+			an = arpCache.lookup(ipPacket.getDestinationAddress());
+		}
+
+		if (an != null) {
+		//	MACAddress dstMac = an.getMac();
+		MACAddress srcMac = bestMatch.getInterface().getMacAddress();
+        MACAddress dstMac = an.getMac();
+
+		nep = nep.setDestinationMACAddress(dstMac.toBytes());
+		nep = nep.setSourceMACAddress(srcMac.toBytes());
+
+	// send packet
+	sendPacket(nep, bestMatch.getInterface());
+	}
+
+
+	}//end method
+
+
+}//end class
+
+
+class RipEntry
+
+
+{
+    protected int netAddr, netMask, gatway, hopCount;
+    protected long lastSeen;
+
+    public RipEntry
+
+{
+
+}
+
+}//end RIP class
